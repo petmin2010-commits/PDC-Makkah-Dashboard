@@ -3219,10 +3219,29 @@ function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&l
 
 /* Universal calculation help for every KPI card and chart */
 function bindCalculationHelp(){
+ // Keep the help UI self-contained so it works even if an older cached CSS file is served.
+ if(!document.getElementById('calcHelpRuntimeStyle')){
+   const style=document.createElement('style');
+   style.id='calcHelpRuntimeStyle';
+   style.textContent=`
+     .has-calc-help{position:relative!important}
+     .calc-help-btn{position:absolute;top:6px;left:6px;z-index:9999;width:21px;height:21px;border-radius:50%;padding:0;border:1px solid rgba(47,111,178,.45);background:#fff;color:#2f6fb2;font:800 11px/1 Arial,sans-serif;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(26,73,120,.18);opacity:.95}
+     .calc-help-btn:hover,.calc-help-btn:focus{transform:scale(1.08);background:#eaf3ff;outline:none}
+     .calc-help-chart{top:8px;left:8px;width:23px;height:23px;font-size:12px}
+     @media print{.calc-help-btn{display:none!important}}
+   `;
+   document.head.appendChild(style);
+ }
+
  const modal=document.getElementById('meetingInfoModal');
  const modalTitle=document.getElementById('meetingInfoTitle');
  const modalText=document.getElementById('meetingInfoText');
- if(!modal||!modalText)return;
+ if(!modal||!modalText){
+   setTimeout(bindCalculationHelp,250);
+   return;
+ }
+ if(document.body.dataset.calcHelpBound==='1')return;
+ document.body.dataset.calcHelpBound='1';
 
  const cleanText=v=>String(v||'').replace(/\s+/g,' ').trim();
  const getCardLabel=el=>{
@@ -3285,7 +3304,7 @@ function bindCalculationHelp(){
  };
 
  const decorate=()=>{
-   document.querySelectorAll('article.master-card,article.mini-kpi,.meeting-kpi,article.kpi-story-card,button.emergency-tree-card,.emergency-description-card,.permit-delay-card').forEach(el=>{
+   document.querySelectorAll('article.master-card,article.mini-kpi,.meeting-kpi,article.kpi-story-card,button.emergency-tree-card,.emergency-description-card,.permit-delay-card,.kpi-card,.stat-card,.summary-card,.metric-card').forEach(el=>{
      if(el.closest('#meetingInfoModal'))return;
      const label=getCardLabel(el);
      addButton(el,label,inferCardHelp(label,el),'card');
