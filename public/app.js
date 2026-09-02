@@ -47,6 +47,7 @@ function bind(){
  if(exportExecutionPdfBtn) exportExecutionPdfBtn.onclick=exportExecutionReportPdf;
 
  bindWednesdayInfoPopups();
+ bindCalculationHelp();
 
  const themeSelect=document.getElementById('themeSelect');
  if(themeSelect) themeSelect.onchange=()=>setDashboardTheme(themeSelect.value,true);
@@ -143,7 +144,7 @@ function bindWednesdayInfoPopups(){
      if(text)text.innerHTML=`
        <div class="meeting-method-list">
          <p><b>التنفيذ:</b> العمود R. يُعتبر الأمر منفذًا فقط إذا كانت القيمة «تم التنفيذ».</p>
-         <p><b>شجرة لم يتم التنفيذ:</b> تُقسم تلقائيًا حسب الحالات الفعلية الموجودة في العمود BC.</p>
+         <p><b>متأخر تنفيذ / ضمن المدة:</b> للأوامر غير المنفذة، من حالة التأخير.</p>
          <p><b>متأخر إغلاق:</b> الأمر منفذ + مرحلة التنفيذ تحتوي «الإغلاق» + حالة المرحلة ليست «تم الانتهاء».</p>
          <p><b>المقاول:</b> العمود G.</p>
          <p><b>نوع العمل:</b> العمود P.</p>
@@ -151,7 +152,7 @@ function bindWednesdayInfoPopups(){
          <p><b>جهة التنفيذ / المكتب:</b> العمود U.</p>
          <p><b>حالة التصاريح:</b> تعتمد كليًا على العمود AO (حالة التصريح من بلدي). جميع القيم المختلفة في AO تظهر تلقائيًا في الجدول والرسم، بما فيها «انتهاء التنسيق - رفض»، وأي حالة جديدة مستقبلًا تظهر تلقائيًا.</p>
          <p><b>شريحة أيام التأخير:</b> العمود BE مباشرة.</p>
-         <p><b>شجرة تم التنفيذ:</b> تعتمد على العمود AK بحيث «نعم» = «مستلم 155 للمقاول» و«لا» = «غير مستلم 155 للمقاول». فرع «غير مستلم 155 للمقاول» ينقسم حسب BF إلى «تم الاستلام من المقاول» و«لم يتم الاستلام من المقاول»، ثم «تم الاستلام من المقاول» ينقسم تلقائيًا حسب الحالات الموجودة في BG.</p>
+         <p><b>حالة المستندات:</b> العمود BF، ويُحتسب فقط لأوامر العمل التي تم تنفيذها (R = تم التنفيذ). وعند حالة "تم الاستلام من المقاول" يتم تقسيمها تلقائيًا حسب القيم الموجودة في العمود BG.</p>
        </div>`;
      if(modal){
        modal.classList.add('show');
@@ -195,7 +196,7 @@ function openPage(key){
    configureMasterFilters();applyMasterFilters();return;
  }
  if(isMeeting){
-   document.getElementById('pageTitle').textContent='اجتماع الخميس';
+   document.getElementById('pageTitle').textContent='اجتماع الأربعاء';
    openWednesdayMeeting();
    return;
  }
@@ -331,30 +332,34 @@ function renderWednesdayMeeting(){
  const incompleteRows=rows.filter(r=>statusNorm(r.executionRaw)==='لم يتم التنفيذ');
  const stoppedRows=rows.filter(r=>['موقوف/محول','متوقف/محول'].includes(statusNorm(r.executionRaw)));
 
- // شجرة الاجتماع:
- // 1) تم التنفيذ -> AK (مستلم 155 للمقاول / غير مستلم 155 للمقاول)
- // 2) غير مستلم 155 للمقاول -> BF (تم الاستلام من المقاول / لم يتم الاستلام من المقاول)
- // 3) تم الاستلام من المقاول -> الحالات الفعلية في BG
- // 4) لم يتم التنفيذ -> الحالات الفعلية في BC
- const akReceivedRows=completedRows.filter(r=>['نعم','مستلم 155 للمقاول'].includes(statusNorm(r.contractor155Status)));
- const akNotReceivedRows=completedRows.filter(r=>['لا','غير مستلم 155 للمقاول'].includes(statusNorm(r.contractor155Status)));
+ // فروع "تم التنفيذ" تعتمد على BF، ثم يتم تفصيل المستندات المستلمة ديناميكيًا حسب BG.
+ const receivedRows=completedRows.filter(r=>statusNorm(r.docsStatus)==='تم الاستلام من المقاول');
+ const docsReceived=receivedRows.length;
+ const docsNotReceived=completedRows.filter(r=>statusNorm(r.docsStatus)==='لم يتم الاستلام من المقاول').length;
+ const docsSubEntries=meetingCountBy(receivedRows,'docsSubStatus');
+ const receivedPct=n=>docsReceived?((n/docsReceived)*100).toFixed(1)+'% من المستلم':'0.0% من المستلم';
+ const docsSubHtml=docsSubEntries.length
+   ? docsSubEntries.map(([label,count])=>`<article class="kpi-story-card kpi-story-grandchild"><span>${esc(label)}</span><strong>${fmt(count)}</strong><small>${receivedPct(count)}</small></article>`).join('')
+   : '<article class="kpi-story-card kpi-story-grandchild"><span>غير محدد</span><strong>0</strong><small>0.0% من المستلم</small></article>';
 
- const bfReceivedRows=akNotReceivedRows.filter(r=>statusNorm(r.docsStatus)==='تم الاستلام من المقاول');
- const bfNotReceivedRows=akNotReceivedRows.filter(r=>statusNorm(r.docsStatus)==='لم يتم الاستلام من المقاول');
- const bgEntries=meetingCountBy(bfReceivedRows,'docsSubStatus');
- const bcEntries=meetingCountBy(incompleteRows,'nonExecutionStatus');
-
- const parentPct=(n,parent,label)=>parent?`${meetingPct(n,parent)}% من ${label}`:`0.0% من ${label}`;
+ // فروع "لم يتم التنفيذ" تعتمد مباشرة على العمود AB (موقف التأخير) فقط.
+ // أي حالة تحتوي على تأخير/متأخر تُحسب "متأخر عن المدة" مهما كان مستوى أو عدد أيام التأخير.
+ // "ضمن المدة" و"أوشك/أوشكت على الانتهاء" تُحسب كلها "ضمن المدة".
+ const delayNorm=v=>statusNorm(v)
+   .normalize('NFKD').replace(/[\u064B-\u065F\u0670]/g,'')
+   .replace(/[أإآ]/g,'ا').replace(/ى/g,'ي');
+ const isWithinDelay=v=>{
+   const d=delayNorm(v);
+   return d.includes('ضمن المدة')||d.includes('اوشك')||d.includes('اوشكت');
+ };
+ const isDelayedDelay=v=>{
+   const d=delayNorm(v);
+   if(isWithinDelay(v))return false;
+   return d.includes('تاخير')||d.includes('متاخر');
+ };
+ const incompleteWithin=incompleteRows.filter(r=>isWithinDelay(r.delayStatus)).length;
+ const incompleteDelayed=incompleteRows.filter(r=>isDelayedDelay(r.delayStatus)).length;
  const pct=n=>meetingPct(n,total)+'% من الإجمالي';
-
- const bgHtml=bgEntries.length
-   ? bgEntries.map(([label,count])=>`<article class="kpi-story-card kpi-story-greatgrandchild"><span>${esc(label)}</span><strong>${fmt(count)}</strong><small>${parentPct(count,bfReceivedRows.length,'المستلم من المقاول')}</small></article>`).join('')
-   : '<article class="kpi-story-card kpi-story-greatgrandchild"><span>غير محدد</span><strong>0</strong><small>0.0% من المستلم من المقاول</small></article>';
-
- const bcHtml=bcEntries.length
-   ? bcEntries.map(([label,count])=>`<article class="kpi-story-card kpi-story-child"><span>${esc(label)}</span><strong>${fmt(count)}</strong><small>${parentPct(count,incompleteRows.length,'لم يتم التنفيذ')}</small></article>`).join('')
-   : '<article class="kpi-story-card kpi-story-child"><span>غير محدد</span><strong>0</strong><small>0.0% من لم يتم التنفيذ</small></article>';
-
  const kroot=document.getElementById('meetingKpis');
  if(kroot)kroot.innerHTML=`
   <div class="kpi-story">
@@ -363,22 +368,19 @@ function renderWednesdayMeeting(){
     <section class="kpi-story-node completed">
      <article class="kpi-story-card"><span>تم التنفيذ</span><strong>${fmt(completedRows.length)}</strong><small>${pct(completedRows.length)}</small></article>
      <div class="kpi-story-children">
-      <article class="kpi-story-card kpi-story-child"><span>مستلم 155 للمقاول</span><strong>${fmt(akReceivedRows.length)}</strong><small>${parentPct(akReceivedRows.length,completedRows.length,'تم التنفيذ')}</small></article>
-      <div class="kpi-story-child-node ak-not-received">
-       <article class="kpi-story-card kpi-story-child"><span>غير مستلم 155 للمقاول</span><strong>${fmt(akNotReceivedRows.length)}</strong><small>${parentPct(akNotReceivedRows.length,completedRows.length,'تم التنفيذ')}</small></article>
-       <div class="kpi-story-grandchildren">
-        <div class="kpi-story-grandchild-node bf-received">
-         <article class="kpi-story-card kpi-story-grandchild"><span>تم الاستلام من المقاول</span><strong>${fmt(bfReceivedRows.length)}</strong><small>${parentPct(bfReceivedRows.length,akNotReceivedRows.length,'غير مستلم 155')}</small></article>
-         <div class="kpi-story-greatgrandchildren">${bgHtml}</div>
-        </div>
-        <article class="kpi-story-card kpi-story-grandchild"><span>لم يتم الاستلام من المقاول</span><strong>${fmt(bfNotReceivedRows.length)}</strong><small>${parentPct(bfNotReceivedRows.length,akNotReceivedRows.length,'غير مستلم 155')}</small></article>
-       </div>
+      <div class="kpi-story-child-node received-docs">
+       <article class="kpi-story-card kpi-story-child"><span>تم استلام مستندات المقاول</span><strong>${fmt(docsReceived)}</strong><small>${pct(docsReceived)}</small></article>
+       <div class="kpi-story-grandchildren">${docsSubHtml}</div>
       </div>
+      <article class="kpi-story-card kpi-story-child"><span>لم يتم استلام مستندات المقاول</span><strong>${fmt(docsNotReceived)}</strong><small>${pct(docsNotReceived)}</small></article>
      </div>
     </section>
     <section class="kpi-story-node incomplete">
      <article class="kpi-story-card"><span>لم يتم التنفيذ</span><strong>${fmt(incompleteRows.length)}</strong><small>${pct(incompleteRows.length)}</small></article>
-     <div class="kpi-story-children kpi-story-bc-children">${bcHtml}</div>
+     <div class="kpi-story-children">
+      <article class="kpi-story-card kpi-story-child"><span>ضمن المدة</span><strong>${fmt(incompleteWithin)}</strong><small>${pct(incompleteWithin)}</small></article>
+      <article class="kpi-story-card kpi-story-child"><span>متأخر عن المدة</span><strong>${fmt(incompleteDelayed)}</strong><small>${pct(incompleteDelayed)}</small></article>
+     </div>
     </section>
     <section class="kpi-story-node stopped">
      <article class="kpi-story-card"><span>موقوف/محول</span><strong>${fmt(stoppedRows.length)}</strong><small>${pct(stoppedRows.length)}</small></article>
@@ -3212,6 +3214,101 @@ function isReady155(v){
 function money(v){return new Intl.NumberFormat('ar-SA',{notation:'compact',maximumFractionDigits:1}).format(Number(v||0))+' ر.س'}
 function sum(rows,k){return rows.reduce((s,r)=>s+(Number(String(r[k]||'').replace(/,/g,'').replace(/[^\d.-]/g,''))||0),0)}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+
+
+
+/* Universal calculation help for every KPI card and chart */
+function bindCalculationHelp(){
+ const modal=document.getElementById('meetingInfoModal');
+ const modalTitle=document.getElementById('meetingInfoTitle');
+ const modalText=document.getElementById('meetingInfoText');
+ if(!modal||!modalText)return;
+
+ const cleanText=v=>String(v||'').replace(/\s+/g,' ').trim();
+ const getCardLabel=el=>{
+   const explicit=el.dataset.calcLabel;
+   if(explicit)return cleanText(explicit);
+   const label=el.querySelector(':scope > span, :scope > .kpi-label, :scope .panel-title h3, :scope h3, :scope h4');
+   if(label)return cleanText(label.textContent);
+   const clone=el.cloneNode(true);
+   clone.querySelectorAll('.calc-help-btn,strong,small,b').forEach(x=>x.remove());
+   return cleanText(clone.textContent).slice(0,100)||'هذا المؤشر';
+ };
+
+ const inferCardHelp=(label,el)=>{
+   const l=cleanText(label);
+   const isStory=el.classList.contains('kpi-story-card')||el.classList.contains('emergency-tree-card')||el.classList.contains('emergency-description-card');
+   if(/نسبة|معدل|إنجاز/.test(l)){
+     return `«${l}» توضح النسبة التي حققت الحالة المطلوبة من إجمالي الحالات التي ينطبق عليها هذا المؤشر. مثال: إذا كانت النسبة 80% فهذا يعني أن 80 حالة من كل 100 حالة داخلة في الحساب حققت الشرط. تتغير النسبة تلقائيًا حسب الفلاتر المختارة في الصفحة.`;
+   }
+   if(/قيمة|تكلفة|غرام|مبلغ|مالي|ريال|ر\.س/.test(l)){
+     return `«${l}» تمثل إجمالي المبالغ المرتبطة بالحالات الظاهرة حاليًا. يتم جمع المبالغ للحالات التي تنطبق عليها الفلاتر فقط، ولا تدخل الحالات التي لا تحتوي على مبلغ صالح في الإجمالي.`;
+   }
+   if(/مقاولون|مهندسون|موظفون|أنواع|فئات|مكاتب|إدارات/.test(l) && !/أوامر|المخالفات/.test(l)){
+     return `«${l}» توضح عدد الجهات أو الأشخاص أو التصنيفات المختلفة الموجودة ضمن البيانات الظاهرة حاليًا. إذا تكرر نفس الاسم في أكثر من حالة فإنه يُحسب كعنصر واحد، وتتغير النتيجة حسب الفلاتر المختارة.`;
+   }
+   if(isStory){
+     return `«${l}» هو عدد الحالات التي وصلت إلى هذه المرحلة من الشجرة. كل مستوى في الشجرة يقسم حالات المستوى السابق حسب وضعها الفعلي؛ لذلك مجموع الفروع التابعة يجب أن يفسر عدد الكارت الأب عندما تكون الفروع شاملة لكل حالاته. النسبة الصغيرة - إن ظهرت - توضح حصة هذا الفرع من المجموعة المشار إليها أسفل الكارت. وتتغير الأرقام مع الفلاتر المختارة.`;
+   }
+   return `«${l}» هو عدد الحالات التي ينطبق عليها وصف هذا الكارت ضمن البيانات الظاهرة حاليًا. بمعنى أن النظام يفحص كل حالة، وإذا كانت حالتها مطابقة لاسم المؤشر تدخل في العدد. الفلاتر والبحث تقلل نطاق البيانات أولًا، ثم يعاد حساب الرقم تلقائيًا.`;
+ };
+ const getChartTitle=canvas=>{
+   const panel=canvas.closest('.panel,.meeting-chart-panel,.chart-card')||canvas.parentElement;
+   const title=panel?.querySelector('.panel-title h3,h3,.section-title h3');
+   return cleanText(title?.textContent)||cleanText(canvas.getAttribute('aria-label'))||'هذا الشارت';
+ };
+
+ const chartHelp=title=>`شارت «${title}» يقسم الحالات الظاهرة حاليًا إلى مجموعات حسب التصنيف المكتوب على الشارت، ثم يعرض حجم كل مجموعة حتى يمكن مقارنة الحالات بسهولة. إذا كان الشارت ماليًا فإنه يعرض مجموع المبالغ بدل عدد الحالات. أي فلتر تختاره في الصفحة يطبق أولًا، ثم يعاد تكوين الشارت من النتائج المتبقية تلقائيًا.`;
+
+ const openHelp=(title,help)=>{
+   if(modalTitle)modalTitle.textContent='ماذا يعني هذا الرقم؟ — '+title;
+   modalText.textContent=help;
+   modal.classList.add('show');
+   modal.setAttribute('aria-hidden','false');
+ };
+
+ const addButton=(host,title,help,kind)=>{
+   if(!host||host.querySelector(':scope > .calc-help-btn'))return;
+   host.classList.add('has-calc-help');
+   const btn=document.createElement('button');
+   btn.type='button';
+   btn.className='calc-help-btn calc-help-'+kind;
+   btn.textContent='!';
+   btn.title='ما معنى هذا الرقم وكيف تم حسابه؟';
+   btn.setAttribute('aria-label','شرح معنى وحساب '+title);
+   btn.addEventListener('click',e=>{
+     e.preventDefault();
+     e.stopPropagation();
+     openHelp(title,help);
+   });
+   host.appendChild(btn);
+ };
+
+ const decorate=()=>{
+   document.querySelectorAll('article.master-card,article.mini-kpi,.meeting-kpi,article.kpi-story-card,button.emergency-tree-card,.emergency-description-card,.permit-delay-card').forEach(el=>{
+     if(el.closest('#meetingInfoModal'))return;
+     const label=getCardLabel(el);
+     addButton(el,label,inferCardHelp(label,el),'card');
+   });
+
+   document.querySelectorAll('canvas').forEach(canvas=>{
+     if(canvas.closest('#meetingInfoModal'))return;
+     const host=canvas.closest('.panel,.meeting-chart-panel,.chart-card')||canvas.parentElement;
+     if(!host)return;
+     const title=getChartTitle(canvas);
+     addButton(host,title,chartHelp(title),'chart');
+   });
+ };
+
+ decorate();
+ let queued=false;
+ const observer=new MutationObserver(()=>{
+   if(queued)return;
+   queued=true;
+   requestAnimationFrame(()=>{queued=false;decorate()});
+ });
+ observer.observe(document.body,{childList:true,subtree:true});
+}
 
 /* =========================
    THEME PICKER — 12 THEMES
