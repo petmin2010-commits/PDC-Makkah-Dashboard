@@ -110,7 +110,7 @@ async function readConfiguredSheet_(cfg,cacheKey){
   }
   if(cacheKey==='permits')map.evaluation=19;
   if(cacheKey==='emergency'){
-    Object.assign(map,{noticeNo:1,assignedDate:3,startDate:4,endDate:5,description:6,classification:7,type:8,administration:9,circuit:10,section:11,emergencyType:12,location:13,consultant:14,engineer:15,contractor:16,contractorReceiver:17,pdcEngineer:18,status:20});
+    Object.assign(map,{noticeNo:1,assignedDate:3,startDate:4,endDate:5,description:6,classification:7,type:8,administration:9,circuit:10,section:11,emergencyType:12,location:13,consultant:14,engineer:15,contractor:16,contractorReceiver:17,pdcEngineer:18,status:20,archive:21});
   }
   let body=values.slice(headerRow);
   if(cacheKey==='permits'){
@@ -219,7 +219,7 @@ async function getCombinedViolationsPage_(){
     });
     execution.forEach(r=>{const u=links.get(Number(r._row));if(u)r.link=u;else if(!/^https?:\/\//i.test(clean_(r.link)))r.link='';});
   }catch(e){console.warn('Execution violation hyperlink enrichment skipped:',e.message||e)}
-  let minutes=[]; try{minutes=await readConfiguredSheet_(APP.PAGES.minutes,'minutes')}catch(e){console.warn('Minutes sheet skipped:',e.message||e)} const rows=[];
+  const minutes=await readConfiguredSheet_(APP.PAGES.minutes,'minutes'); const rows=[];
   execution.forEach(r=>{const x={source:'مخالفات التنفيذ',workOrder:r.workOrder||'',type:r.type||'',contractor:r.contractor||'',region:'',location:'',date:r.date||'',violation:r.violation||'',violationSection:r.violationSection||'',supervisor:r.supervisor||'',editor:r.editor||'',reason:r.reason||'',link:r.link||'',emailStatus:r.emailStatus||'',uploadStatus:'',penalty:'',_row:r._row||''};x._search=Object.values(x).join(' ').toLowerCase();rows.push(x)});
   minutes.forEach(r=>{const x={source:'محاضر المخالفات',workOrder:r.workOrder||'',type:r.type||'',contractor:r.contractor||'',region:r.region||'',location:r.location||'',date:r.date||'',violation:r.minuteType||'',violationSection:'',supervisor:'',editor:r.editor||'',reason:r.statement||'',link:'',emailStatus:'',uploadStatus:r.uploadStatus||'',penalty:r.penalty||'',_row:r._row||''};x._search=Object.values(x).join(' ').toLowerCase();rows.push(x)});
   const cfg=APP.PAGES.violationsCombined;
@@ -266,7 +266,7 @@ function meetingPermitStatus_(v){
 }
 
 async function getWednesdayMeetingData(){
-  const key='PDC_WEDNESDAY_MEETING_V7';
+  const key='PDC_WEDNESDAY_MEETING_V8';
   const hit=cacheGet(key);
   if(hit)return hit;
 
@@ -293,9 +293,11 @@ async function getWednesdayMeetingData(){
     daysSince:col(['عدد الايام منذ الاسناد','عدد الأيام منذ الإسناد'],25),
     duration:col(['المدة uds','المدة'],26),
     delayStatus:27, // العمود AB مباشرة: موقف التأخير
+    contractor155Status:36, // العمود AK مباشرة: مستلم / غير مستلم 155 للمقاول
     permitStatus:col(['حالة التصريح من بلدي','حالة التصريح'],40),
     advice:col(['إفادة الاستشاري','افادة الاستشاري'],53),
     stage:col(['مرحلة التنفيذ'],54),
+    nonExecutionStatus:54, // العمود BC مباشرة: حالات أوامر العمل غير المنفذة
     stageStatus:col(['حالة المرحلة'],55),
     delayBucket:col(['شريحة ايام التاخير','شريحة أيام التأخير'],56),
     docsStatus:57, // العمود BF مباشرة: حالة استلام مستندات المقاول
@@ -348,6 +350,8 @@ async function getWednesdayMeetingData(){
       delayedExecution:executionStatus==='متأخر تنفيذ',
       delayedClosure,
       delayStatus,
+      contractor155Status:clean_(r[ix.contractor155Status])||'غير محدد',
+      nonExecutionStatus:clean_(r[ix.nonExecutionStatus])||'غير محدد',
       delayDays,
       delayBucket:clean_(r[ix.delayBucket])||'غير محدد',
       permitStatus,
@@ -667,7 +671,7 @@ app.use((req,res)=>{
 });
 
 app.listen(PORT,'0.0.0.0',()=>{
-  console.log(`PDC Makkah website: http://0.0.0.0:${PORT}`);
+  console.log(`PDC Jeddah website: http://0.0.0.0:${PORT}`);
   console.log(`Public directory: ${PUBLIC_DIR}`);
   console.log(`index.html exists: ${fs.existsSync(INDEX_FILE)}`);
 });
