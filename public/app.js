@@ -143,7 +143,7 @@ function bindWednesdayInfoPopups(){
      if(text)text.innerHTML=`
        <div class="meeting-method-list">
          <p><b>التنفيذ:</b> العمود R. يُعتبر الأمر منفذًا فقط إذا كانت القيمة «تم التنفيذ».</p>
-         <p><b>متأخر تنفيذ / ضمن المدة:</b> للأوامر غير المنفذة، من حالة التأخير.</p>
+         <p><b>شجرة لم يتم التنفيذ:</b> تُقسم تلقائيًا حسب الحالات الفعلية الموجودة في العمود BC.</p>
          <p><b>متأخر إغلاق:</b> الأمر منفذ + مرحلة التنفيذ تحتوي «الإغلاق» + حالة المرحلة ليست «تم الانتهاء».</p>
          <p><b>المقاول:</b> العمود G.</p>
          <p><b>نوع العمل:</b> العمود P.</p>
@@ -151,7 +151,7 @@ function bindWednesdayInfoPopups(){
          <p><b>جهة التنفيذ / المكتب:</b> العمود U.</p>
          <p><b>حالة التصاريح:</b> تعتمد كليًا على العمود AO (حالة التصريح من بلدي). جميع القيم المختلفة في AO تظهر تلقائيًا في الجدول والرسم، بما فيها «انتهاء التنسيق - رفض»، وأي حالة جديدة مستقبلًا تظهر تلقائيًا.</p>
          <p><b>شريحة أيام التأخير:</b> العمود BE مباشرة.</p>
-         <p><b>حالة المستندات:</b> العمود BF، ويُحتسب فقط لأوامر العمل التي تم تنفيذها (R = تم التنفيذ). وعند حالة "تم الاستلام من المقاول" يتم تقسيمها تلقائيًا حسب القيم الموجودة في العمود BG.</p>
+         <p><b>شجرة تم التنفيذ:</b> تبدأ من العمود AK إلى «مستلم 155 للمقاول» و«غير مستلم 155 للمقاول». فرع «غير مستلم 155 للمقاول» ينقسم حسب BF إلى «تم الاستلام من المقاول» و«لم يتم الاستلام من المقاول»، ثم «تم الاستلام من المقاول» ينقسم تلقائيًا حسب الحالات الموجودة في BG.</p>
        </div>`;
      if(modal){
        modal.classList.add('show');
@@ -195,7 +195,7 @@ function openPage(key){
    configureMasterFilters();applyMasterFilters();return;
  }
  if(isMeeting){
-   document.getElementById('pageTitle').textContent='اجتماع الأربعاء';
+   document.getElementById('pageTitle').textContent='اجتماع الخميس';
    openWednesdayMeeting();
    return;
  }
@@ -331,34 +331,30 @@ function renderWednesdayMeeting(){
  const incompleteRows=rows.filter(r=>statusNorm(r.executionRaw)==='لم يتم التنفيذ');
  const stoppedRows=rows.filter(r=>['موقوف/محول','متوقف/محول'].includes(statusNorm(r.executionRaw)));
 
- // فروع "تم التنفيذ" تعتمد على BF، ثم يتم تفصيل المستندات المستلمة ديناميكيًا حسب BG.
- const receivedRows=completedRows.filter(r=>statusNorm(r.docsStatus)==='تم الاستلام من المقاول');
- const docsReceived=receivedRows.length;
- const docsNotReceived=completedRows.filter(r=>statusNorm(r.docsStatus)==='لم يتم الاستلام من المقاول').length;
- const docsSubEntries=meetingCountBy(receivedRows,'docsSubStatus');
- const receivedPct=n=>docsReceived?((n/docsReceived)*100).toFixed(1)+'% من المستلم':'0.0% من المستلم';
- const docsSubHtml=docsSubEntries.length
-   ? docsSubEntries.map(([label,count])=>`<article class="kpi-story-card kpi-story-grandchild"><span>${esc(label)}</span><strong>${fmt(count)}</strong><small>${receivedPct(count)}</small></article>`).join('')
-   : '<article class="kpi-story-card kpi-story-grandchild"><span>غير محدد</span><strong>0</strong><small>0.0% من المستلم</small></article>';
+ // شجرة الاجتماع:
+ // 1) تم التنفيذ -> AK (مستلم 155 للمقاول / غير مستلم 155 للمقاول)
+ // 2) غير مستلم 155 للمقاول -> BF (تم الاستلام من المقاول / لم يتم الاستلام من المقاول)
+ // 3) تم الاستلام من المقاول -> الحالات الفعلية في BG
+ // 4) لم يتم التنفيذ -> الحالات الفعلية في BC
+ const akReceivedRows=completedRows.filter(r=>statusNorm(r.contractor155Status)==='مستلم 155 للمقاول');
+ const akNotReceivedRows=completedRows.filter(r=>statusNorm(r.contractor155Status)==='غير مستلم 155 للمقاول');
 
- // فروع "لم يتم التنفيذ" تعتمد مباشرة على العمود AB (موقف التأخير) فقط.
- // أي حالة تحتوي على تأخير/متأخر تُحسب "متأخر عن المدة" مهما كان مستوى أو عدد أيام التأخير.
- // "ضمن المدة" و"أوشك/أوشكت على الانتهاء" تُحسب كلها "ضمن المدة".
- const delayNorm=v=>statusNorm(v)
-   .normalize('NFKD').replace(/[\u064B-\u065F\u0670]/g,'')
-   .replace(/[أإآ]/g,'ا').replace(/ى/g,'ي');
- const isWithinDelay=v=>{
-   const d=delayNorm(v);
-   return d.includes('ضمن المدة')||d.includes('اوشك')||d.includes('اوشكت');
- };
- const isDelayedDelay=v=>{
-   const d=delayNorm(v);
-   if(isWithinDelay(v))return false;
-   return d.includes('تاخير')||d.includes('متاخر');
- };
- const incompleteWithin=incompleteRows.filter(r=>isWithinDelay(r.delayStatus)).length;
- const incompleteDelayed=incompleteRows.filter(r=>isDelayedDelay(r.delayStatus)).length;
+ const bfReceivedRows=akNotReceivedRows.filter(r=>statusNorm(r.docsStatus)==='تم الاستلام من المقاول');
+ const bfNotReceivedRows=akNotReceivedRows.filter(r=>statusNorm(r.docsStatus)==='لم يتم الاستلام من المقاول');
+ const bgEntries=meetingCountBy(bfReceivedRows,'docsSubStatus');
+ const bcEntries=meetingCountBy(incompleteRows,'nonExecutionStatus');
+
+ const parentPct=(n,parent,label)=>parent?`${meetingPct(n,parent)}% من ${label}`:`0.0% من ${label}`;
  const pct=n=>meetingPct(n,total)+'% من الإجمالي';
+
+ const bgHtml=bgEntries.length
+   ? bgEntries.map(([label,count])=>`<article class="kpi-story-card kpi-story-greatgrandchild"><span>${esc(label)}</span><strong>${fmt(count)}</strong><small>${parentPct(count,bfReceivedRows.length,'المستلم من المقاول')}</small></article>`).join('')
+   : '<article class="kpi-story-card kpi-story-greatgrandchild"><span>غير محدد</span><strong>0</strong><small>0.0% من المستلم من المقاول</small></article>';
+
+ const bcHtml=bcEntries.length
+   ? bcEntries.map(([label,count])=>`<article class="kpi-story-card kpi-story-child"><span>${esc(label)}</span><strong>${fmt(count)}</strong><small>${parentPct(count,incompleteRows.length,'لم يتم التنفيذ')}</small></article>`).join('')
+   : '<article class="kpi-story-card kpi-story-child"><span>غير محدد</span><strong>0</strong><small>0.0% من لم يتم التنفيذ</small></article>';
+
  const kroot=document.getElementById('meetingKpis');
  if(kroot)kroot.innerHTML=`
   <div class="kpi-story">
@@ -367,19 +363,22 @@ function renderWednesdayMeeting(){
     <section class="kpi-story-node completed">
      <article class="kpi-story-card"><span>تم التنفيذ</span><strong>${fmt(completedRows.length)}</strong><small>${pct(completedRows.length)}</small></article>
      <div class="kpi-story-children">
-      <div class="kpi-story-child-node received-docs">
-       <article class="kpi-story-card kpi-story-child"><span>تم استلام مستندات المقاول</span><strong>${fmt(docsReceived)}</strong><small>${pct(docsReceived)}</small></article>
-       <div class="kpi-story-grandchildren">${docsSubHtml}</div>
+      <article class="kpi-story-card kpi-story-child"><span>مستلم 155 للمقاول</span><strong>${fmt(akReceivedRows.length)}</strong><small>${parentPct(akReceivedRows.length,completedRows.length,'تم التنفيذ')}</small></article>
+      <div class="kpi-story-child-node ak-not-received">
+       <article class="kpi-story-card kpi-story-child"><span>غير مستلم 155 للمقاول</span><strong>${fmt(akNotReceivedRows.length)}</strong><small>${parentPct(akNotReceivedRows.length,completedRows.length,'تم التنفيذ')}</small></article>
+       <div class="kpi-story-grandchildren">
+        <div class="kpi-story-grandchild-node bf-received">
+         <article class="kpi-story-card kpi-story-grandchild"><span>تم الاستلام من المقاول</span><strong>${fmt(bfReceivedRows.length)}</strong><small>${parentPct(bfReceivedRows.length,akNotReceivedRows.length,'غير مستلم 155')}</small></article>
+         <div class="kpi-story-greatgrandchildren">${bgHtml}</div>
+        </div>
+        <article class="kpi-story-card kpi-story-grandchild"><span>لم يتم الاستلام من المقاول</span><strong>${fmt(bfNotReceivedRows.length)}</strong><small>${parentPct(bfNotReceivedRows.length,akNotReceivedRows.length,'غير مستلم 155')}</small></article>
+       </div>
       </div>
-      <article class="kpi-story-card kpi-story-child"><span>لم يتم استلام مستندات المقاول</span><strong>${fmt(docsNotReceived)}</strong><small>${pct(docsNotReceived)}</small></article>
      </div>
     </section>
     <section class="kpi-story-node incomplete">
      <article class="kpi-story-card"><span>لم يتم التنفيذ</span><strong>${fmt(incompleteRows.length)}</strong><small>${pct(incompleteRows.length)}</small></article>
-     <div class="kpi-story-children">
-      <article class="kpi-story-card kpi-story-child"><span>ضمن المدة</span><strong>${fmt(incompleteWithin)}</strong><small>${pct(incompleteWithin)}</small></article>
-      <article class="kpi-story-card kpi-story-child"><span>متأخر عن المدة</span><strong>${fmt(incompleteDelayed)}</strong><small>${pct(incompleteDelayed)}</small></article>
-     </div>
+     <div class="kpi-story-children kpi-story-bc-children">${bcHtml}</div>
     </section>
     <section class="kpi-story-node stopped">
      <article class="kpi-story-card"><span>موقوف/محول</span><strong>${fmt(stoppedRows.length)}</strong><small>${pct(stoppedRows.length)}</small></article>
@@ -812,6 +811,29 @@ function rowMatchesChartFilter(row,filter){
 
   if(filter.mode==='not-completed'){
     return !exactStatus(row[filter.field],'تم التنفيذ');
+  }
+
+  if(filter.mode==='blank'){
+    return !String(row[filter.field]??'').trim();
+  }
+
+  if(filter.mode==='emergency-archive-stage'){
+    if(!emergencyIsDone(row))return false;
+    const archive=normalizeEmergencyStage(row.archive);
+    const notReceived=normalizeEmergencyStage('لم يستلم من المقاول');
+    if(filter.value==='__received__')return archive!==notReceived;
+    if(filter.value==='__blank__')return !archive;
+    return archive===normalizeEmergencyStage(filter.value);
+  }
+
+  if(filter.mode==='emergency-type-description'){
+    try{
+      const [type,description]=JSON.parse(filter.value);
+      return exactStatus(row.emergencyType,type) &&
+        cleanEmergencyTreeValue(row.description)===cleanEmergencyTreeValue(description);
+    }catch(e){
+      return false;
+    }
   }
 
   return String(row[filter.field]??'').trim()===String(filter.value??'').trim();
@@ -1635,7 +1657,29 @@ function emergencyStatusValue(row){
   return s || 'غير محدد';
 }
 
+function normalizeEmergencyStage(value){
+  return String(value||'')
+    .replace(/[\u064B-\u065F\u0670]/g,'')
+    .replace(/ـ/g,'')
+    .replace(/ال\s*PDC/gi,'PDC')
+    .replace(/^معاد[هة]?(?=\s*ل)/,'معاد')
+    .replace(/\s+/g,'')
+    .toLocaleLowerCase('ar');
+}
+
+function cleanEmergencyTreeValue(value){
+  return String(value||'').replace(/\s+/g,' ').trim();
+}
+
 function renderEmergencyDashboard(baseRows){
+  renderEmergencyStatusTree(
+    applyChartFilters(baseRows,'emergencyStatusTree','emergency')
+  );
+
+  renderEmergencyTypeTree(
+    applyChartFilters(baseRows,'emergencyTypeTree','emergency')
+  );
+
   renderEmergencyMonthlyChart(
     applyChartFilters(baseRows,'emergencyMonthlyChart','emergency')
   );
@@ -1677,6 +1721,195 @@ function renderEmergencyDashboard(baseRows){
     'contractor',
     'المقاول'
   );
+}
+
+function renderEmergencyStatusTree(rows){
+  const root=document.getElementById('emergencyStatusTree');
+  if(!root)return;
+
+  const total=rows.length;
+  const countStatus=value=>rows.filter(r=>exactStatus(r.status,value)).length;
+  const completedRows=rows.filter(r=>exactStatus(r.status,'منجز'));
+  const completed=completedRows.length;
+  const running=countStatus('جاري التنفيذ');
+  const notStarted=countStatus('لم يتم البدء');
+  const blankStatus=rows.filter(r=>!String(r.status||'').trim()).length;
+  const rate=(count,base)=>base?(count/base*100):0;
+  const statusActive=activeChartFilter('emergencyStatusTree','emergency');
+
+  // العمود V في ورقة «اشعارات الطوارئ» ممثل بالحقل archive.
+  const archiveCount=label=>{
+    const target=normalizeEmergencyStage(label);
+    return completedRows.filter(r=>normalizeEmergencyStage(r.archive)===target).length;
+  };
+  const notReceived=archiveCount('لم يستلم من المقاول');
+  const received=Math.max(0,completed-notReceived);
+  const consultantReview=archiveCount('قيد مراجعة الاستشاري');
+  const returnedContractor=archiveCount('معاده للمقاول بملاحظات');
+  const pdcReview=archiveCount('قيد مراجعة ال PDC');
+  const approvedPdc=archiveCount('تم الاعتماد من PDC');
+  const readyPdc=archiveCount('جاهز للرفع لـPDC');
+  const returnedConsultant=archiveCount('معاده للاستشاري بملاحظات');
+  const blankArchive=completedRows.filter(r=>!normalizeEmergencyStage(r.archive)).length;
+
+  const statusCard=(label,value,tone)=>{
+    const selected=statusActive&&statusActive.field==='status'&&String(statusActive.value)===label;
+    return `<button type="button" class="emergency-tree-card emergency-tree-${tone} ${selected?'selected':''}" data-tree-field="status" data-tree-value="${esc(label)}" data-tree-mode="exact" data-tree-label="حالة إشعار الطوارئ">
+      <span>${esc(label)}</span>
+      <strong>${fmt(value)}</strong>
+      <small>${rate(value,total).toFixed(1)}% من إجمالي الإشعارات</small>
+    </button>`;
+  };
+
+  const archiveCard=(label,value,position,filterValue=label)=>{
+    const selected=statusActive&&statusActive.mode==='emergency-archive-stage'&&String(statusActive.value)===String(filterValue);
+    return `<button type="button" class="emergency-tree-card emergency-tree-doc-card ${position} ${selected?'selected':''}" data-tree-field="archive" data-tree-value="${esc(filterValue)}" data-tree-mode="emergency-archive-stage" data-tree-label="حالة المستندات">
+      <span>${esc(label)}</span>
+      <strong>${fmt(value)}</strong>
+      <small>${rate(value,completed).toFixed(1)}% من المنجز</small>
+    </button>`;
+  };
+
+  root.innerHTML=`
+    <div class="emergency-tree-canvas">
+      <svg class="emergency-tree-lines" viewBox="0 0 1160 1040" aria-hidden="true" focusable="false">
+        <defs>
+          <marker id="emergencyGreenArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="tree-arrow-green"/></marker>
+          <marker id="emergencyOrangeArrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 Z" class="tree-arrow-orange"/></marker>
+        </defs>
+
+        <path class="tree-status-line" d="M580 105 V135 M140 135 H1020 M140 135 V165 M580 135 V165 M1020 135 V165"/>
+        <path class="tree-doc-line" d="M1020 270 V300 H580 V325 M580 367 V390 M250 390 H910 M250 390 V410 M910 390 V410"/>
+
+        <rect class="tree-loop-box" x="60" y="392" width="1020" height="285" rx="30"/>
+        <rect class="tree-loop-box" x="60" y="527" width="1020" height="405" rx="30"/>
+
+        <path class="tree-flow-green" marker-end="url(#emergencyGreenArrow)" d="M390 462 H770"/>
+        <path class="tree-flow-green" marker-end="url(#emergencyGreenArrow)" d="M910 515 V545"/>
+        <path class="tree-flow-orange" marker-end="url(#emergencyOrangeArrow)" d="M770 580 H390"/>
+        <path class="tree-flow-orange" marker-end="url(#emergencyOrangeArrow)" d="M250 545 V515"/>
+
+        <path class="tree-flow-green" marker-end="url(#emergencyGreenArrow)" d="M910 650 V680"/>
+        <path class="tree-flow-orange" marker-end="url(#emergencyOrangeArrow)" d="M770 715 H390"/>
+        <path class="tree-flow-orange tree-return-flow" marker-end="url(#emergencyOrangeArrow)" d="M390 748 C545 730 620 625 770 625"/>
+        <path class="tree-flow-green" marker-end="url(#emergencyGreenArrow)" d="M910 785 V815"/>
+        <path class="tree-flow-green" marker-end="url(#emergencyGreenArrow)" d="M910 920 V950"/>
+
+        <path class="tree-quality-line" d="M210 982 C435 982 570 462 770 462"/>
+        <text class="tree-loop-label" x="78" y="420">دورة ملاحظات المقاول</text>
+        <text class="tree-loop-label" x="78" y="555">دورة ملاحظات الاستشاري</text>
+        <text class="tree-arrow-label" x="580" y="448">عند الاستلام</text>
+        <text class="tree-arrow-label tree-arrow-label-orange" x="590" y="716">إعادة للمراجعة</text>
+      </svg>
+
+      <article class="emergency-tree-card emergency-tree-root">
+        <span>إجمالي إشعارات الطوارئ</span>
+        <strong>${fmt(total)}</strong>
+        <small>100% من إجمالي الإشعارات</small>
+      </article>
+
+      <button type="button" class="emergency-tree-warning ${statusActive&&statusActive.mode==='blank'?'selected':''}" data-tree-field="status" data-tree-value="" data-tree-mode="blank" data-tree-label="حالة التنفيذ"><b>!</b><span>حالة التنفيذ فارغة</span><strong>${fmt(blankStatus)}</strong></button>
+
+      <div class="tree-status tree-status-pending">${statusCard('لم يتم البدء',notStarted,'pending')}</div>
+      <div class="tree-status tree-status-running">${statusCard('جاري التنفيذ',running,'running')}</div>
+      <div class="tree-status tree-status-completed">${statusCard('منجز',completed,'success')}</div>
+
+      <div class="emergency-tree-docs-title">دورة المستندات — العمود V</div>
+      ${archiveCard('لم يستلم من المقاول',notReceived,'tree-doc-not-received')}
+      ${archiveCard('مستلم من المقاول',received,'tree-doc-received','__received__')}
+      ${archiveCard('معاده للمقاول بملاحظات',returnedContractor,'tree-doc-returned-contractor')}
+      ${archiveCard('قيد مراجعة الاستشاري',consultantReview,'tree-doc-consultant-review')}
+      ${archiveCard('معاده للاستشاري بملاحظات',returnedConsultant,'tree-doc-returned-consultant')}
+      ${archiveCard('قيد مراجعة ال PDC',pdcReview,'tree-doc-pdc-review')}
+      ${archiveCard('تم الاعتماد من PDC',approvedPdc,'tree-doc-pdc-approved')}
+      ${archiveCard('جاهز للرفع لـPDC',readyPdc,'tree-doc-pdc-ready')}
+
+      <button type="button" class="emergency-tree-card emergency-tree-archive-warning ${statusActive&&statusActive.value==='__blank__'?'selected':''}" data-tree-field="archive" data-tree-value="__blank__" data-tree-mode="emergency-archive-stage" data-tree-label="حالة المستندات">
+        <span>الفراغات</span><strong>${fmt(blankArchive)}</strong><small>تنبيه جودة بيانات</small>
+      </button>
+    </div>`;
+
+  root.querySelectorAll('[data-tree-field]').forEach(card=>{
+    card.onclick=()=>toggleChartFilter(
+      'emergencyStatusTree',card.dataset.treeField,card.dataset.treeValue,
+      card.dataset.treeLabel,card.dataset.treeMode,
+      card.querySelector('span')?.textContent||card.dataset.treeValue
+    );
+  });
+}
+
+function renderEmergencyTypeTree(rows){
+  const root=document.getElementById('emergencyTypeTree');
+  if(!root)return;
+
+  const total=rows.length;
+  const rate=(count,base)=>base?(count/base*100):0;
+  const active=activeChartFilter('emergencyTypeTree','emergency');
+  const types=[
+    {label:'طارئ',tone:'urgent'},
+    {label:'مجدول',tone:'scheduled'}
+  ];
+  const knownTypes=new Set(types.map(x=>x.label));
+  const unclassified=rows.filter(r=>!knownTypes.has(cleanEmergencyTreeValue(r.emergencyType))).length;
+
+  const descriptionEntries=type=>{
+    const typeRows=rows.filter(r=>exactStatus(r.emergencyType,type));
+    const counts=new Map();
+    typeRows.forEach(r=>{
+      const value=cleanEmergencyTreeValue(r.description);
+      counts.set(value,(counts.get(value)||0)+1);
+    });
+    return {
+      rows:typeRows,
+      entries:[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'ar'))
+    };
+  };
+
+  const typeBranch=({label,tone})=>{
+    const data=descriptionEntries(label);
+    const typeSelected=active&&active.field==='emergencyType'&&active.mode==='exact'&&String(active.value)===label;
+    return `<section class="emergency-type-branch emergency-type-${tone}">
+      <button type="button" class="emergency-tree-card emergency-type-card ${typeSelected?'selected':''}" data-type-field="emergencyType" data-type-value="${esc(label)}" data-type-mode="exact" data-type-display="${esc(label)}">
+        <span>${esc(label)}</span>
+        <strong>${fmt(data.rows.length)}</strong>
+        <small>${rate(data.rows.length,total).toFixed(1)}% من إجمالي الإشعارات</small>
+      </button>
+      <div class="emergency-description-tree">
+        <div class="emergency-description-title">وصف العمل — العمود G</div>
+        <div class="emergency-description-list">
+          ${data.entries.length?data.entries.map(([description,count])=>{
+            const filterValue=JSON.stringify([label,description]);
+            const selected=active&&active.mode==='emergency-type-description'&&String(active.value)===filterValue;
+            const shown=description||'الفراغات في وصف العمل';
+            return `<button type="button" class="emergency-tree-card emergency-description-card ${!description?'description-blank':''} ${selected?'selected':''}" data-type-field="description" data-type-value="${esc(filterValue)}" data-type-mode="emergency-type-description" data-type-display="${esc(label+' — '+shown)}">
+              <span>${esc(shown)}</span><strong>${fmt(count)}</strong><small>${rate(count,data.rows.length).toFixed(1)}% من ${esc(label)}</small>
+            </button>`;
+          }).join(''):'<article class="emergency-tree-card emergency-description-card is-empty"><span>لا توجد إشعارات</span><strong>٠</strong><small>0.0%</small></article>'}
+        </div>
+      </div>
+    </section>`;
+  };
+
+  root.innerHTML=`
+    <div class="emergency-type-tree-canvas">
+      <article class="emergency-tree-card emergency-type-root">
+        <span>إجمالي إشعارات الطوارئ</span>
+        <strong>${fmt(total)}</strong>
+        <small>100% من إجمالي الإشعارات</small>
+      </article>
+      ${unclassified?`<div class="emergency-type-quality-warning"><b>!</b> غير مصنف في العمود M: <strong>${fmt(unclassified)}</strong></div>`:''}
+      <div class="emergency-type-branches">
+        ${types.map(typeBranch).join('')}
+      </div>
+    </div>`;
+
+  root.querySelectorAll('[data-type-field]').forEach(card=>{
+    card.onclick=()=>toggleChartFilter(
+      'emergencyTypeTree',card.dataset.typeField,card.dataset.typeValue,
+      card.dataset.typeMode==='emergency-type-description'?'النوع ووصف العمل':'نوع الإشعار',
+      card.dataset.typeMode,card.dataset.typeDisplay
+    );
+  });
 }
 
 function emergencyMonthLabel(key){
@@ -2180,12 +2413,15 @@ function renderDataPage(){
    });
  }
 
+ const emergencyTreeSection=document.getElementById('emergencyTreeSection');
  const emergencyAnalytics=document.getElementById('emergencyAnalytics');
  const genericPageCharts=document.getElementById('genericPageCharts');
  const safetyAnalytics=document.getElementById('safetyMasterAnalytics');
  const executionAnalytics=document.getElementById('executionMasterAnalytics');
  const isCorporateViolationReport=key==='safety'||key==='violationsCombined';
  document.body.classList.toggle('vd-report-dark',isCorporateViolationReport);
+
+ if(emergencyTreeSection) emergencyTreeSection.style.display=key==='emergency'?'block':'none';
 
  if(safetyAnalytics) safetyAnalytics.style.display=key==='safety'?'block':'none';
  if(executionAnalytics) executionAnalytics.style.display=key==='violationsCombined'?'block':'none';
@@ -2486,6 +2722,14 @@ function renderPermitDelayKpis(rows){
 }
 
 function renderPageKpis(key,rows){
+ const pageKpis=document.getElementById('pageKpis');
+ pageKpis.classList.toggle('emergency-kpi-board',key==='emergency');
+
+ if(key==='emergency'){
+   renderEmergencyKpis(rows,pageKpis);
+   return;
+ }
+
  let cards=[['إجمالي السجلات',rows.length]];
  const add=(l,v)=>cards.push([l,v]);
 
@@ -2572,10 +2816,12 @@ function renderPageKpis(key,rows){
      const done=rows.filter(r=>exactStatus(r.status,'منجز')).length;
      const running=rows.filter(r=>exactStatus(r.status,'جاري التنفيذ')).length;
      const notStarted=rows.filter(r=>exactStatus(r.status,'لم يتم البدء')).length;
+     const blankStatus=rows.filter(r=>!String(r.status||'').trim()).length;
 
      add('منجز',done);
      add('جاري التنفيذ',running);
      add('لم يتم البدء',notStarted);
+     add('الفراغات',blankStatus);
      add('نسبة الإنجاز',pct(done,rows.length));
      add('الأحياء / المواقع',unique(rows.map(r=>r.location)).length);
      add('المقاولون',unique(rows.map(r=>r.contractor)).length);
@@ -2588,7 +2834,115 @@ function renderPageKpis(key,rows){
  if(key==='violationsCombined'){
    cards=cards.filter(c=>c[0]!=='إجمالي السجلات');
  }
- document.getElementById('pageKpis').innerHTML=cards.slice(0,18).map(c=>`<article class="mini-kpi"><span>${esc(c[0])}</span><strong>${typeof c[1]==='string'?c[1]:fmt(c[1])}</strong></article>`).join('');
+ pageKpis.innerHTML=cards.slice(0,18).map(c=>`<article class="mini-kpi"><span>${esc(c[0])}</span><strong>${typeof c[1]==='string'?c[1]:fmt(c[1])}</strong></article>`).join('');
+}
+
+function renderEmergencyKpis(rows,root){
+ const filled=(r,key)=>String(r[key]||'').trim()!=='';
+ const uniq=key=>unique(rows.map(r=>r[key]).filter(v=>String(v||'').trim())).length;
+ const statusCount=value=>rows.filter(r=>exactStatus(r.status,value)).length;
+ const textCount=(key,value)=>rows.filter(r=>exactStatus(r[key],value)).length;
+ const validDurations=(fromKey,toKey)=>rows.map(r=>{
+   const from=parseDashboardDate(r[fromKey]);
+   const to=parseDashboardDate(r[toKey]);
+   if(!from||!to)return null;
+   const days=(to-from)/86400000;
+   return days>=0?days:null;
+ }).filter(v=>v!==null);
+ const avgDays=values=>values.length?(values.reduce((a,b)=>a+b,0)/values.length):null;
+ const durationText=values=>{
+   const avg=avgDays(values);
+   if(avg===null)return '—';
+   if(avg<1)return `${(avg*24).toFixed(1)} ساعة`;
+   return `${avg.toFixed(1)} يوم`;
+ };
+ const today=new Date();
+ const isSameDay=(a,b)=>a&&b&&a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+ const assignedToday=rows.filter(r=>isSameDay(parseDashboardDate(r.assignedDate),today)).length;
+ const assignedThisMonth=rows.filter(r=>{
+   const d=parseDashboardDate(r.assignedDate);
+   return d&&d.getFullYear()===today.getFullYear()&&d.getMonth()===today.getMonth();
+ }).length;
+ const sameDayCompleted=rows.filter(r=>isSameDay(parseDashboardDate(r.assignedDate),parseDashboardDate(r.endDate))).length;
+ const done=statusCount('منجز');
+ const running=statusCount('جاري التنفيذ');
+ const notStarted=statusCount('لم يتم البدء');
+ const blankStatus=rows.filter(r=>!filled(r,'status')).length;
+ const scheduled=textCount('emergencyType','مجدول');
+ const urgent=textCount('emergencyType','طارئ');
+ const unclassifiedEmergency=Math.max(0,rows.length-scheduled-urgent);
+ const archiveIsDone=row=>{
+   const value=String(row.archive||'').replace(/\s+/g,' ').trim();
+   if(!value)return false;
+   return !/(^|\s)(لا|لم|غير)(\s|$)|غير مكتمل|ناقص/.test(value);
+ };
+ const archived=rows.filter(archiveIsDone).length;
+ const notArchived=rows.length-archived;
+ const responseDurations=validDurations('assignedDate','startDate');
+ const executionDurations=validDurations('startDate','endDate');
+ const totalDurations=validDurations('assignedDate','endDate');
+ const groups=[
+   {title:'الحالة والإنجاز',tone:'status',cards:[
+     ['إجمالي الإشعارات',rows.length,'كامل النطاق المفلتر'],
+     ['الإشعارات الفريدة',uniq('noticeNo'),'حسب رقم المهمة / الإشعار'],
+     ['منجز',done,pct(done,rows.length)],
+     ['جاري التنفيذ',running,pct(running,rows.length)],
+     ['لم يتم البدء',notStarted,pct(notStarted,rows.length)],
+     ['الفراغات',blankStatus,pct(blankStatus,rows.length)],
+     ['نسبة الإنجاز',pct(done,rows.length),'من إجمالي الإشعارات'],
+     ['إجمالي غير المنجز',running+notStarted+blankStatus,'جاري التنفيذ + لم يبدأ + الفراغات']
+   ]},
+   {title:'المتابعة الزمنية',tone:'time',cards:[
+     ['مسند اليوم',assignedToday,'حسب تاريخ الإسناد'],
+     ['مسند هذا الشهر',assignedThisMonth,'حسب تاريخ الإسناد'],
+     ['تمت مباشرة العمل',rows.filter(r=>filled(r,'startDate')).length,pct(rows.filter(r=>filled(r,'startDate')).length,rows.length)],
+     ['لم تبدأ بعد',rows.filter(r=>!filled(r,'startDate')).length,'لا يوجد تاريخ مباشرة'],
+     ['لها تاريخ انتهاء',rows.filter(r=>filled(r,'endDate')).length,pct(rows.filter(r=>filled(r,'endDate')).length,rows.length)],
+     ['إنجاز في نفس يوم الإسناد',sameDayCompleted,pct(sameDayCompleted,rows.length)],
+     ['متوسط زمن المباشرة',durationText(responseDurations),`${responseDurations.length} سجل صالح`],
+     ['متوسط مدة التنفيذ',durationText(executionDurations),`${executionDurations.length} سجل صالح`],
+     ['متوسط الإسناد حتى الانتهاء',durationText(totalDurations),`${totalDurations.length} سجل صالح`]
+   ]},
+   {title:'طبيعة البلاغ والأرشفة',tone:'type',cards:[
+     ['طارئ',urgent,pct(urgent,rows.length)],
+     ['مجدول',scheduled,pct(scheduled,rows.length)],
+     ['غير محدد مجدول/طارئ',unclassifiedEmergency,'تحتاج تصنيف'],
+     ['تمت أرشفة المستندات',archived,pct(archived,rows.length)],
+     ['لم تتم الأرشفة',notArchived,pct(notArchived,rows.length)],
+     ['نسبة الأرشفة',pct(archived,rows.length),'من إجمالي الإشعارات']
+   ]},
+   {title:'التغطية التشغيلية',tone:'coverage',cards:[
+     ['المحطات / المغذيات',uniq('station'),'قيم فريدة'],
+     ['أوصاف الأعمال',uniq('description'),'قيم فريدة'],
+     ['تصنيفات العمل',uniq('classification'),'قيم فريدة'],
+     ['الأنواع',uniq('type'),'قيم فريدة'],
+     ['الإدارات',uniq('administration'),'قيم فريدة'],
+     ['الدوائر',uniq('circuit'),'قيم فريدة'],
+     ['الأقسام',uniq('section'),'قيم فريدة'],
+     ['المواقع',uniq('location'),'قيم فريدة'],
+     ['الجهات الاستشارية',uniq('consultant'),'قيم فريدة'],
+     ['الاستشاريون',uniq('engineer'),'أسماء فريدة'],
+     ['المقاولون',uniq('contractor'),'قيم فريدة']
+   ]},
+   {title:'جودة واكتمال البيانات',tone:'quality',cards:[
+     ['بدون رقم إشعار',rows.filter(r=>!filled(r,'noticeNo')).length,'بيانات ناقصة'],
+     ['بدون محطة / مغذي',rows.filter(r=>!filled(r,'station')).length,'بيانات ناقصة'],
+     ['بدون تاريخ إسناد',rows.filter(r=>!filled(r,'assignedDate')).length,'بيانات ناقصة'],
+     ['بدون وصف عمل',rows.filter(r=>!filled(r,'description')).length,'بيانات ناقصة'],
+     ['بدون موقع',rows.filter(r=>!filled(r,'location')).length,'بيانات ناقصة'],
+     ['بدون اسم استشاري',rows.filter(r=>!filled(r,'engineer')).length,'بيانات ناقصة'],
+     ['بدون مقاول',rows.filter(r=>!filled(r,'contractor')).length,'بيانات ناقصة']
+   ]}
+ ];
+
+ root.innerHTML=groups.map(group=>`
+   <section class="emergency-kpi-group emergency-kpi-${group.tone}">
+     <div class="emergency-kpi-group-head"><h3>${esc(group.title)}</h3><span>${fmt(group.cards.length)} مؤشرات</span></div>
+     <div class="emergency-kpi-cards">
+       ${group.cards.map(card=>`<article class="mini-kpi emergency-mini-kpi"><span>${esc(card[0])}</span><strong>${typeof card[1]==='number'?fmt(card[1]):esc(card[1])}</strong><small>${esc(card[2]||'')}</small></article>`).join('')}
+     </div>
+   </section>
+ `).join('');
 }
 function pickDimensions(key){
  const m={
