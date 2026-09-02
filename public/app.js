@@ -151,7 +151,7 @@ function bindWednesdayInfoPopups(){
          <p><b>جهة التنفيذ / المكتب:</b> العمود U.</p>
          <p><b>حالة التصاريح:</b> تعتمد كليًا على العمود AO (حالة التصريح من بلدي). جميع القيم المختلفة في AO تظهر تلقائيًا في الجدول والرسم، بما فيها «انتهاء التنسيق - رفض»، وأي حالة جديدة مستقبلًا تظهر تلقائيًا.</p>
          <p><b>شريحة أيام التأخير:</b> العمود BE مباشرة.</p>
-         <p><b>شجرة تم التنفيذ:</b> تبدأ من العمود AK إلى «مستلم 155 للمقاول» و«غير مستلم 155 للمقاول». فرع «غير مستلم 155 للمقاول» ينقسم حسب BF إلى «تم الاستلام من المقاول» و«لم يتم الاستلام من المقاول»، ثم «تم الاستلام من المقاول» ينقسم تلقائيًا حسب الحالات الموجودة في BG.</p>
+         <p><b>شجرة تم التنفيذ:</b> تعتمد على العمود AK بحيث «نعم» = «مستلم 155 للمقاول» و«لا» = «غير مستلم 155 للمقاول». فرع «غير مستلم 155 للمقاول» ينقسم حسب BF إلى «تم الاستلام من المقاول» و«لم يتم الاستلام من المقاول»، ثم «تم الاستلام من المقاول» ينقسم تلقائيًا حسب الحالات الموجودة في BG.</p>
        </div>`;
      if(modal){
        modal.classList.add('show');
@@ -336,8 +336,8 @@ function renderWednesdayMeeting(){
  // 2) غير مستلم 155 للمقاول -> BF (تم الاستلام من المقاول / لم يتم الاستلام من المقاول)
  // 3) تم الاستلام من المقاول -> الحالات الفعلية في BG
  // 4) لم يتم التنفيذ -> الحالات الفعلية في BC
- const akReceivedRows=completedRows.filter(r=>statusNorm(r.contractor155Status)==='مستلم 155 للمقاول');
- const akNotReceivedRows=completedRows.filter(r=>statusNorm(r.contractor155Status)==='غير مستلم 155 للمقاول');
+ const akReceivedRows=completedRows.filter(r=>['نعم','مستلم 155 للمقاول'].includes(statusNorm(r.contractor155Status)));
+ const akNotReceivedRows=completedRows.filter(r=>['لا','غير مستلم 155 للمقاول'].includes(statusNorm(r.contractor155Status)));
 
  const bfReceivedRows=akNotReceivedRows.filter(r=>statusNorm(r.docsStatus)==='تم الاستلام من المقاول');
  const bfNotReceivedRows=akNotReceivedRows.filter(r=>statusNorm(r.docsStatus)==='لم يتم الاستلام من المقاول');
